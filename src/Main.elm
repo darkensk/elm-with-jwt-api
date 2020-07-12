@@ -1,20 +1,21 @@
-port module Main exposing (..)
+port module Main exposing (main)
 
-import Html exposing (..)
-import Html.Events exposing (..)
-import Html.Attributes exposing (..)
-import Http
-import Json.Decode as Decode exposing (..)
-import Json.Encode as Encode exposing (..)
+import Browser
+import Html exposing (Html, blockquote, button, div, h2, h3, input, label, p, text)
+import Html.Attributes exposing (class, for, id, type_)
+import Html.Events exposing (onClick, onInput)
+import Http exposing (Error(..))
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode
 
 
-main : Program (Maybe Model) Model Msg
+main : Program Flags Model Msg
 main =
-    Html.programWithFlags
+    Browser.element
         { init = init
+        , view = view
         , update = update
         , subscriptions = \_ -> Sub.none
-        , view = view
         }
 
 
@@ -37,14 +38,31 @@ type alias Model =
     }
 
 
-init : Maybe Model -> ( Model, Cmd Msg )
-init model =
-    case model of
+type alias Flags =
+    {}
+
+
+init : Flags -> ( Model, Cmd Msg )
+init _ =
+    let
+        initModel =
+            Nothing
+
+        emptyModel =
+            { username = ""
+            , password = ""
+            , token = ""
+            , quote = ""
+            , protectedQuote = ""
+            , errorMsg = ""
+            }
+    in
+    case initModel of
         Just model ->
             ( model, fetchRandomQuoteCmd )
 
         Nothing ->
-            ( Model "" "" "" "" "" "", fetchRandomQuoteCmd )
+            ( emptyModel, Cmd.none )
 
 
 
@@ -90,14 +108,12 @@ protectedQuoteUrl =
 -- GET a random quote (unauthenticated)
 
 
-fetchRandomQuote : Http.Request String
-fetchRandomQuote =
-    Http.getString randomQuoteUrl
-
-
 fetchRandomQuoteCmd : Cmd Msg
 fetchRandomQuoteCmd =
-    Http.send FetchRandomQuoteCompleted fetchRandomQuote
+    Http.get
+        { url = randomQuoteUrl
+        , expect = Http.expectString FetchRandomQuoteCompleted
+        }
 
 
 fetchRandomQuoteCompleted : Model -> Result Http.Error String -> ( Model, Cmd Msg )
@@ -107,7 +123,8 @@ fetchRandomQuoteCompleted model result =
             setStorageHelper { model | quote = newQuote }
 
         Err _ ->
-            ( model, Cmd.none ) 
+            ( model, Cmd.none )
+
 
 
 -- Encode user to construct POST request body (for Register and Log In)
@@ -125,21 +142,17 @@ userEncoder model =
 -- POST register / login request
 
 
-authUser : Model -> String -> Http.Request String
-authUser model apiUrl =
-    let
-        body =
-            model
-                |> userEncoder
-                |> Http.jsonBody
-    in
-        Http.post apiUrl body tokenDecoder
-
-
 authUserCmd : Model -> String -> Cmd Msg
 authUserCmd model apiUrl =
-    Http.send GetTokenCompleted (authUser model apiUrl)
-
+    let
+        encodedBody =
+            userEncoder model
+    in
+    Http.post
+        { url = apiUrl
+        , expect = Http.expectJson GetTokenCompleted tokenDecoder
+        , body = Http.jsonBody encodedBody
+        }
 
 
 getTokenCompleted : Model -> Result Http.Error String -> ( Model, Cmd Msg )
@@ -149,7 +162,25 @@ getTokenCompleted model result =
             setStorageHelper { model | token = newToken, password = "", errorMsg = "" }
 
         Err error ->
-            ( { model | errorMsg = (toString error) }, Cmd.none )
+            let
+                errorMessage =
+                    case error of
+                        BadUrl string ->
+                            string
+
+                        Timeout ->
+                            "Request timed out"
+
+                        NetworkError ->
+                            "Network Error"
+
+                        BadStatus statusCode ->
+                            "Error status code: "  ++ String.fromInt statusCode
+
+                        BadBody string ->
+                            string
+            in
+            ( { model | errorMsg = errorMessage }, Cmd.none )
 
 
 
@@ -161,26 +192,17 @@ tokenDecoder =
     Decode.field "access_token" Decode.string
 
 
-
--- GET request for random protected quote (authenticated)
-
-
-fetchProtectedQuote : Model -> Http.Request String
-fetchProtectedQuote model =
-    { method = "GET"
-    , headers = [ Http.header "Authorization" ("Bearer " ++ model.token) ]
-    , url = protectedQuoteUrl
-    , body = Http.emptyBody
-    , expect = Http.expectString
-    , timeout = Nothing
-    , withCredentials = False
-    }
-        |> Http.request
-
-
 fetchProtectedQuoteCmd : Model -> Cmd Msg
 fetchProtectedQuoteCmd model =
-    Http.send FetchProtectedQuoteCompleted (fetchProtectedQuote model)
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ model.token) ]
+        , url = protectedQuoteUrl
+        , body = Http.emptyBody
+        , expect = Http.expectString FetchProtectedQuoteCompleted
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 fetchProtectedQuoteCompleted : Model -> Result Http.Error String -> ( Model, Cmd Msg )
@@ -190,7 +212,7 @@ fetchProtectedQuoteCompleted model result =
             setStorageHelper { model | protectedQuote = newPQuote }
 
         Err _ ->
-            ( model, Cmd.none )   
+            ( model, Cmd.none )
 
 
 
@@ -283,10 +305,7 @@ view model =
         -- Is the user logged in?
         loggedIn : Bool
         loggedIn =
-            if String.length model.token > 0 then
-                True
-            else
-                False
+            String.length model.token > 0
 
         -- If the user is logged in, show a greeting; if logged out, show the login/register form
         authBoxView =
@@ -296,6 +315,7 @@ view model =
                 showError =
                     if String.isEmpty model.errorMsg then
                         "hidden"
+
                     else
                         ""
 
@@ -304,38 +324,39 @@ view model =
                 greeting =
                     "Hello, " ++ model.username ++ "!"
             in
-                if loggedIn then
-                    div [ id "greeting" ]
-                        [ h3 [ class "text-center" ] [ text greeting ]
-                        , p [ class "text-center" ] [ text "You have super-secret access to protected quotes." ]
-                        , p [ class "text-center" ]
-                            [ button [ class "btn btn-danger", onClick LogOut ] [ text "Log Out" ]
+            if loggedIn then
+                div [ id "greeting" ]
+                    [ h3 [ class "text-center" ] [ text greeting ]
+                    , p [ class "text-center" ] [ text "You have super-secret access to protected quotes." ]
+                    , p [ class "text-center" ]
+                        [ button [ class "btn btn-danger", onClick LogOut ] [ text "Log Out" ]
+                        ]
+                    ]
+
+            else
+                div [ id "form" ]
+                    [ h2 [ class "text-center" ] [ text "Log In or Register" ]
+                    , p [ class "help-block" ] [ text "If you already have an account, please Log In. Otherwise, enter your desired username and password and Register." ]
+                    , div [ class showError ]
+                        [ div [ class "alert alert-danger" ] [ text model.errorMsg ]
+                        ]
+                    , div [ class "form-group row" ]
+                        [ div [ class "col-md-offset-2 col-md-8" ]
+                            [ label [ for "username" ] [ text "Username:" ]
+                            , input [ id "username", type_ "text", class "form-control", Html.Attributes.value model.username, onInput SetUsername ] []
                             ]
                         ]
-                else
-                    div [ id "form" ]
-                        [ h2 [ class "text-center" ] [ text "Log In or Register" ]
-                        , p [ class "help-block" ] [ text "If you already have an account, please Log In. Otherwise, enter your desired username and password and Register." ]
-                        , div [ class showError ]
-                            [ div [ class "alert alert-danger" ] [ text model.errorMsg ]
-                            ]
-                        , div [ class "form-group row" ]
-                            [ div [ class "col-md-offset-2 col-md-8" ]
-                                [ label [ for "username" ] [ text "Username:" ]
-                                , input [ id "username", type_ "text", class "form-control", Html.Attributes.value model.username, onInput SetUsername ] []
-                                ]
-                            ]
-                        , div [ class "form-group row" ]
-                            [ div [ class "col-md-offset-2 col-md-8" ]
-                                [ label [ for "password" ] [ text "Password:" ]
-                                , input [ id "password", type_ "password", class "form-control", Html.Attributes.value model.password, onInput SetPassword ] []
-                                ]
-                            ]
-                        , div [ class "text-center" ]
-                            [ button [ class "btn btn-primary", onClick ClickLogIn ] [ text "Log In" ]
-                            , button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
+                    , div [ class "form-group row" ]
+                        [ div [ class "col-md-offset-2 col-md-8" ]
+                            [ label [ for "password" ] [ text "Password:" ]
+                            , input [ id "password", type_ "password", class "form-control", Html.Attributes.value model.password, onInput SetPassword ] []
                             ]
                         ]
+                    , div [ class "text-center" ]
+                        [ button [ class "btn btn-primary", onClick ClickLogIn ] [ text "Log In" ]
+                        , button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
+                        ]
+                    ]
 
         -- If user is logged in, show button and quote; if logged out, show a message instructing them to log in
         protectedQuoteView =
@@ -345,38 +366,43 @@ view model =
                 hideIfNoProtectedQuote =
                     if String.isEmpty model.protectedQuote then
                         "hidden"
+
                     else
                         ""
             in
-                if loggedIn then
-                    div []
-                        [ p [ class "text-center" ]
-                            [ button [ class "btn btn-info", onClick GetProtectedQuote ] [ text "Grab a protected quote!" ]
-                            ]
-                          -- Blockquote with protected quote: only show if a protectedQuote is present in model
-                        , blockquote [ class hideIfNoProtectedQuote ]
-                            [ p [] [ text model.protectedQuote ]
-                            ]
+            if loggedIn then
+                div []
+                    [ p [ class "text-center" ]
+                        [ button [ class "btn btn-info", onClick GetProtectedQuote ] [ text "Grab a protected quote!" ]
                         ]
-                else
-                    p [ class "text-center" ] [ text "Please log in or register to see protected quotes." ]
+
+                    -- Blockquote with protected quote: only show if a protectedQuote is present in model
+                    , blockquote [ class hideIfNoProtectedQuote ]
+                        [ p [] [ text model.protectedQuote ]
+                        ]
+                    ]
+
+            else
+                p [ class "text-center" ] [ text "Please log in or register to see protected quotes." ]
     in
-        div [ class "container" ]
-            [ h2 [ class "text-center" ] [ text "Chuck Norris Quotes" ]
-            , p [ class "text-center" ]
-                [ button [ class "btn btn-success", onClick GetQuote ] [ text "Grab a quote!" ]
-                ]
-              -- Blockquote with quote
-            , blockquote []
-                [ p [] [ text model.quote ]
-                ]
-            , div [ class "jumbotron text-left" ]
-                [ -- Login/Register form or user greeting
-                  authBoxView
-                ]
-            , div []
-                [ h2 [ class "text-center" ] [ text "Protected Chuck Norris Quotes" ]
-                  -- Protected quotes
-                , protectedQuoteView
-                ]
+    div [ class "container" ]
+        [ h2 [ class "text-center" ] [ text "Chuck Norris Quotes" ]
+        , p [ class "text-center" ]
+            [ button [ class "btn btn-success", onClick GetQuote ] [ text "Grab a quote!" ]
             ]
+
+        -- Blockquote with quote
+        , blockquote []
+            [ p [] [ text model.quote ]
+            ]
+        , div [ class "jumbotron text-left" ]
+            [ -- Login/Register form or user greeting
+              authBoxView
+            ]
+        , div []
+            [ h2 [ class "text-center" ] [ text "Protected Chuck Norris Quotes" ]
+
+            -- Protected quotes
+            , protectedQuoteView
+            ]
+        ]

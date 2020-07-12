@@ -9,18 +9,19 @@
     </head>
     
     <body>
+        <div id="main"></div>
     </body>
     
     <script>
         var storedState = localStorage.getItem('model');
         var startingState = storedState ? JSON.parse(storedState) : null;
-        var elmApp = Elm.Main.fullscreen(startingState);
+        var app = Elm.Main.init({ node: document.querySelector('#main') })
 
-        elmApp.ports.setStorage.subscribe(function(state) {
+        app.ports.setStorage.subscribe(function(state) {
             localStorage.setItem('model', JSON.stringify(state));
         });
 
-        elmApp.ports.removeStorage.subscribe(function() {
+        app.ports.removeStorage.subscribe(function() {
             localStorage.removeItem('model');
         });
     </script>
