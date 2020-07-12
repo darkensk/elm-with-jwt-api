@@ -38,7 +38,16 @@ type alias Model =
 
 init : ( Model, Cmd Msg )
 init =
-    ( Model "" "" "" "" "", fetchRandomQuoteCmd )
+    let
+        emptyModel =
+            { username = ""
+            , password = ""
+            , token = ""
+            , quote = ""
+            , errorMsg = ""
+            }
+    in
+    ( emptyModel, fetchRandomQuoteCmd )
 
 
 
