@@ -1,4 +1,4 @@
-port module Main exposing (main)
+module Main exposing (main)
 
 import Browser
 import Html exposing (Html, blockquote, button, div, h2, h3, input, label, p, text)
@@ -9,10 +9,10 @@ import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
 
 
-main : Program Flags Model Msg
+main : Program () Model Msg
 main =
     Browser.element
-        { init = init
+        { init = \_ -> init
         , view = view
         , update = update
         , subscriptions = \_ -> Sub.none
@@ -24,7 +24,6 @@ main =
    MODEL
    * Model type
    * Initialize model with empty values
-   * Initialize with a random quote
 -}
 
 
@@ -33,36 +32,13 @@ type alias Model =
     , password : String
     , token : String
     , quote : String
-    , protectedQuote : String
     , errorMsg : String
     }
 
 
-type alias Flags =
-    {}
-
-
-init : Flags -> ( Model, Cmd Msg )
-init _ =
-    let
-        initModel =
-            Nothing
-
-        emptyModel =
-            { username = ""
-            , password = ""
-            , token = ""
-            , quote = ""
-            , protectedQuote = ""
-            , errorMsg = ""
-            }
-    in
-    case initModel of
-        Just model ->
-            ( model, fetchRandomQuoteCmd )
-
-        Nothing ->
-            ( emptyModel, Cmd.none )
+init : ( Model, Cmd Msg )
+init =
+    ( Model "" "" "" "" "", fetchRandomQuoteCmd )
 
 
 
@@ -73,7 +49,6 @@ init _ =
    * Encode request body
    * Decode responses
    * Messages
-   * Ports
    * Update case
 -}
 -- API request URLs
@@ -94,16 +69,6 @@ registerUrl =
     api ++ "users"
 
 
-loginUrl : String
-loginUrl =
-    api ++ "sessions/create"
-
-
-protectedQuoteUrl : String
-protectedQuoteUrl =
-    api ++ "api/protected/random-quote"
-
-
 
 -- GET a random quote (unauthenticated)
 
@@ -120,7 +85,7 @@ fetchRandomQuoteCompleted : Model -> Result Http.Error String -> ( Model, Cmd Ms
 fetchRandomQuoteCompleted model result =
     case result of
         Ok newQuote ->
-            setStorageHelper { model | quote = newQuote }
+            ( { model | quote = newQuote }, Cmd.none )
 
         Err _ ->
             ( model, Cmd.none )
@@ -159,7 +124,10 @@ getTokenCompleted : Model -> Result Http.Error String -> ( Model, Cmd Msg )
 getTokenCompleted model result =
     case result of
         Ok newToken ->
-            setStorageHelper { model | token = newToken, password = "", errorMsg = "" }
+            -- let
+            --     _ = Debug.log "New token received: " newToken
+            -- in
+            ( { model | token = newToken, password = "", errorMsg = "" }, Cmd.none )
 
         Err error ->
             let
@@ -175,7 +143,7 @@ getTokenCompleted model result =
                             "Network Error"
 
                         BadStatus statusCode ->
-                            "Error status code: "  ++ String.fromInt statusCode
+                            "Error status code: " ++ String.fromInt statusCode
 
                         BadBody string ->
                             string
@@ -189,39 +157,7 @@ getTokenCompleted model result =
 
 tokenDecoder : Decoder String
 tokenDecoder =
-    Decode.field "access_token" Decode.string
-
-
-fetchProtectedQuoteCmd : Model -> Cmd Msg
-fetchProtectedQuoteCmd model =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ model.token) ]
-        , url = protectedQuoteUrl
-        , body = Http.emptyBody
-        , expect = Http.expectString FetchProtectedQuoteCompleted
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-fetchProtectedQuoteCompleted : Model -> Result Http.Error String -> ( Model, Cmd Msg )
-fetchProtectedQuoteCompleted model result =
-    case result of
-        Ok newPQuote ->
-            setStorageHelper { model | protectedQuote = newPQuote }
-
-        Err _ ->
-            ( model, Cmd.none )
-
-
-
--- Helper to update model and set localStorage with the updated model
-
-
-setStorageHelper : Model -> ( Model, Cmd Msg )
-setStorageHelper model =
-    ( model, setStorage model )
+    Decode.field "id_token" Decode.string
 
 
 
@@ -234,21 +170,7 @@ type Msg
     | SetUsername String
     | SetPassword String
     | ClickRegisterUser
-    | ClickLogIn
     | GetTokenCompleted (Result Http.Error String)
-    | GetProtectedQuote
-    | FetchProtectedQuoteCompleted (Result Http.Error String)
-    | LogOut
-
-
-
--- Ports
-
-
-port setStorage : Model -> Cmd msg
-
-
-port removeStorage : Model -> Cmd msg
 
 
 
@@ -273,20 +195,8 @@ update msg model =
         ClickRegisterUser ->
             ( model, authUserCmd model registerUrl )
 
-        ClickLogIn ->
-            ( model, authUserCmd model loginUrl )
-
         GetTokenCompleted result ->
             getTokenCompleted model result
-
-        GetProtectedQuote ->
-            ( model, fetchProtectedQuoteCmd model )
-
-        FetchProtectedQuoteCompleted result ->
-            fetchProtectedQuoteCompleted model result
-
-        LogOut ->
-            ( { model | username = "", protectedQuote = "", token = "" }, removeStorage model )
 
 
 
@@ -294,8 +204,7 @@ update msg model =
    VIEW
    * Hide sections of view depending on authenticaton state of model
    * Get a quote
-   * Log In or Register
-   * Get a protected quote
+   * Register
 -}
 
 
@@ -328,9 +237,6 @@ view model =
                 div [ id "greeting" ]
                     [ h3 [ class "text-center" ] [ text greeting ]
                     , p [ class "text-center" ] [ text "You have super-secret access to protected quotes." ]
-                    , p [ class "text-center" ]
-                        [ button [ class "btn btn-danger", onClick LogOut ] [ text "Log Out" ]
-                        ]
                     ]
 
             else
@@ -353,37 +259,9 @@ view model =
                             ]
                         ]
                     , div [ class "text-center" ]
-                        [ button [ class "btn btn-primary", onClick ClickLogIn ] [ text "Log In" ]
-                        , button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
+                        [ button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
                         ]
                     ]
-
-        -- If user is logged in, show button and quote; if logged out, show a message instructing them to log in
-        protectedQuoteView =
-            let
-                -- If no protected quote, apply a class of "hidden"
-                hideIfNoProtectedQuote : String
-                hideIfNoProtectedQuote =
-                    if String.isEmpty model.protectedQuote then
-                        "hidden"
-
-                    else
-                        ""
-            in
-            if loggedIn then
-                div []
-                    [ p [ class "text-center" ]
-                        [ button [ class "btn btn-info", onClick GetProtectedQuote ] [ text "Grab a protected quote!" ]
-                        ]
-
-                    -- Blockquote with protected quote: only show if a protectedQuote is present in model
-                    , blockquote [ class hideIfNoProtectedQuote ]
-                        [ p [] [ text model.protectedQuote ]
-                        ]
-                    ]
-
-            else
-                p [ class "text-center" ] [ text "Please log in or register to see protected quotes." ]
     in
     div [ class "container" ]
         [ h2 [ class "text-center" ] [ text "Chuck Norris Quotes" ]
@@ -398,11 +276,5 @@ view model =
         , div [ class "jumbotron text-left" ]
             [ -- Login/Register form or user greeting
               authBoxView
-            ]
-        , div []
-            [ h2 [ class "text-center" ] [ text "Protected Chuck Norris Quotes" ]
-
-            -- Protected quotes
-            , protectedQuoteView
             ]
         ]
