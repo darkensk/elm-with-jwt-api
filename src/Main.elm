@@ -69,6 +69,11 @@ registerUrl =
     api ++ "users"
 
 
+loginUrl : String
+loginUrl =
+    api ++ "sessions/create"
+
+
 
 -- GET a random quote (unauthenticated)
 
@@ -157,7 +162,7 @@ getTokenCompleted model result =
 
 tokenDecoder : Decoder String
 tokenDecoder =
-    Decode.field "id_token" Decode.string
+    Decode.field "access_token" Decode.string
 
 
 
@@ -170,7 +175,9 @@ type Msg
     | SetUsername String
     | SetPassword String
     | ClickRegisterUser
+    | ClickLogIn
     | GetTokenCompleted (Result Http.Error String)
+    | LogOut
 
 
 
@@ -195,8 +202,14 @@ update msg model =
         ClickRegisterUser ->
             ( model, authUserCmd model registerUrl )
 
+        ClickLogIn ->
+            ( model, authUserCmd model loginUrl )
+
         GetTokenCompleted result ->
             getTokenCompleted model result
+
+        LogOut ->
+            ( { model | username = "", token = "" }, Cmd.none )
 
 
 
@@ -204,7 +217,7 @@ update msg model =
    VIEW
    * Hide sections of view depending on authenticaton state of model
    * Get a quote
-   * Register
+   * Log In or Register
 -}
 
 
@@ -237,6 +250,9 @@ view model =
                 div [ id "greeting" ]
                     [ h3 [ class "text-center" ] [ text greeting ]
                     , p [ class "text-center" ] [ text "You have super-secret access to protected quotes." ]
+                    , p [ class "text-center" ]
+                        [ button [ class "btn btn-danger", onClick LogOut ] [ text "Log Out" ]
+                        ]
                     ]
 
             else
@@ -259,7 +275,8 @@ view model =
                             ]
                         ]
                     , div [ class "text-center" ]
-                        [ button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
+                        [ button [ class "btn btn-primary", onClick ClickLogIn ] [ text "Log In" ]
+                        , button [ class "btn btn-link", onClick ClickRegisterUser ] [ text "Register" ]
                         ]
                     ]
     in
